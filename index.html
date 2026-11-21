@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kumpulan Cerpen Kelas 6A</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #2b2b2b; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; color: #eee; }
+  #book { max-width: 100%; }
+  #status { font-size: 14px; margin-bottom: 8px; min-height: 17px; }
+  #hint { font-size: 12px; opacity: .7; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="status">Memuat halaman…</div>
+<div id="book"></div>
+<div id="hint">Geser atau ketuk tepi halaman untuk membalik</div>
+
+<script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
+<script>
+  const JUMLAH = 23;
+  // Harus sama dengan W, H di seragamkan.py
+  const LEBAR = 600, TINGGI = 894;
+
+  const pages = Array.from({ length: JUMLAH }, (_, i) =>
+    `img/${String(i + 1).padStart(2, '0')}.jpg`);
+
+  const flip = new St.PageFlip(document.getElementById('book'), {
+    width: LEBAR,
+    height: TINGGI,
+    size: 'stretch',
+    minWidth: 280,
+    maxWidth: 900,
+    minHeight: 400,
+    maxHeight: 1273,
+    showCover: true,
+    usePortrait: true,
+    mobileScrollSupport: false
+  });
+
+  flip.loadFromImages(pages);
+  flip.on('init', () => document.getElementById('status').textContent = '');
+  flip.on('flip', e => {
+    document.getElementById('status').textContent = `Halaman ${e.data + 1} dari ${JUMLAH}`;
+  });
+</script>
+</body>
+</html>
