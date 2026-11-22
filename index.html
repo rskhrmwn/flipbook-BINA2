@@ -10,23 +10,153 @@
   #book { max-width: 100%; }
   #status { font-size: 14px; margin-bottom: 8px; min-height: 17px; }
   #hint { font-size: 12px; opacity: .7; margin-top: 8px; }
+
+  #musik {
+    position: fixed; top: 10px; right: 10px; z-index: 5;
+    font: inherit; font-size: 14px; font-weight: bold; border: none; cursor: pointer;
+    padding: 10px 14px; border-radius: 30px; background: #feca57; color: #222;
+    box-shadow: 0 4px 0 #e17055;
+  }
+  #musik:active { transform: translateY(3px); box-shadow: 0 1px 0 #e17055; }
+  #musik.belum { animation: nyala 1.2s ease-in-out infinite; }
+  @keyframes nyala { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
 </style>
 </head>
 <body>
+
+<button id="musik" class="belum">🎵 Putar musik</button>
+
 <div id="status">Memuat halaman…</div>
 <div id="book"></div>
 <div id="hint">Geser atau ketuk tepi halaman untuk membalik</div>
 
 <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js"></script>
 <script>
+  // ===== Pengaturan buku (harus sama dengan hasil seragamkan.py) =====
   const JUMLAH = 23;
-  // Harus sama dengan W, H di seragamkan.py
   const LEBAR = 600, TINGGI = 894;
 
+  // ===== Musik latar: loop ceria 4 bar, dibuat langsung di browser =====
+  const BPM = 116;
+  const STEP = 60 / BPM / 4;                  // durasi satu langkah (1/16 nada)
+  const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+
+  const CHORDS = [[60, 64, 67], [57, 60, 64], [53, 57, 60], [55, 59, 62]]; // C, Am, F, G
+  const BASS   = [36, 33, 29, 31];
+  // Melodi per bar: [posisi langkah, nada MIDI, panjang dalam langkah]
+  const MEL = [
+    [[0, 76, 2], [2, 79, 2], [4, 84, 4], [8, 79, 2], [10, 76, 2], [12, 72, 4]],
+    [[0, 81, 2], [2, 79, 2], [4, 76, 2], [6, 72, 2], [8, 76, 4], [12, 79, 4]],
+    [[0, 77, 2], [2, 81, 2], [4, 84, 2], [6, 81, 2], [8, 77, 4], [12, 74, 2], [14, 72, 2]],
+    [[0, 79, 2], [2, 83, 2], [4, 86, 2], [6, 83, 2], [8, 79, 2], [10, 74, 2], [12, 71, 4]]
+  ];
+
+  let ctx = null, master = null, noiseBuf = null;
+  let sudahMulai = false, nyala = true;
+  let nextTime = 0, langkah = 0, timer = null;
+
+  function siapkanAudio() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const kompresor = ctx.createDynamicsCompressor();
+    master = ctx.createGain();
+    master.gain.value = 0.7;
+    master.connect(kompresor);
+    kompresor.connect(ctx.destination);
+
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+
+  function nadaOsc(tipe, f, t, dur, vol) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = tipe;
+    o.frequency.setValueAtTime(f, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + dur + 0.05);
+  }
+
+  function kick(t) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.setValueAtTime(150, t);
+    o.frequency.exponentialRampToValueAtTime(40, t + 0.12);
+    g.gain.setValueAtTime(0.9, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + 0.22);
+  }
+
+  function percik(t, tipe, freq, dur, vol) {
+    const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = noiseBuf;
+    f.type = tipe; f.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    s.connect(f); f.connect(g); g.connect(master);
+    s.start(t); s.stop(t + dur + 0.02);
+  }
+
+  function jadwalkan(n, t) {
+    const k = n % 64;
+    const bar = Math.floor(k / 16);
+    const pos = k % 16;
+
+    if (pos % 4 === 0) kick(t);                                   // drum utama
+    if (pos === 4 || pos === 12) percik(t, 'bandpass', 1500, 0.15, 0.5); // tepukan
+    if (pos % 2 === 1) percik(t, 'highpass', 7000, 0.05, 0.12);   // hi-hat
+    if (pos % 2 === 0) nadaOsc('triangle', hz(BASS[bar]), t, STEP * 1.8, 0.12); // bass
+    if (pos === 0) CHORDS[bar].forEach(m => nadaOsc('sine', hz(m), t, STEP * 16, 0.02)); // pad
+    MEL[bar].forEach(([p, m, len]) => {
+      if (p === pos) nadaOsc('triangle', hz(m), t, STEP * len * 0.95, 0.09);  // melodi
+    });
+  }
+
+  function skeduler() {
+    while (nextTime < ctx.currentTime + 0.12) {
+      jadwalkan(langkah, nextTime);
+      nextTime += STEP;
+      langkah++;
+    }
+  }
+
+  function mulaiMusik() {
+    siapkanAudio();
+    if (ctx.state === 'suspended') ctx.resume();
+    nextTime = ctx.currentTime + 0.05;
+    timer = setInterval(skeduler, 25);
+  }
+
+  // Efek suara saat halaman dibalik (ikut dibisukan bila musik mati)
+  function sfxBalik() {
+    if (!ctx || !sudahMulai) return;
+    percik(ctx.currentTime, 'highpass', 2000, 0.12, 0.25);
+  }
+
+  // ===== Tombol musik =====
+  const btn = document.getElementById('musik');
+  btn.addEventListener('click', () => {
+    if (!sudahMulai) {
+      sudahMulai = true;
+      nyala = true;
+      mulaiMusik();
+      btn.classList.remove('belum');
+      btn.textContent = '🔊 Musik: nyala';
+    } else {
+      nyala = !nyala;
+      master.gain.setTargetAtTime(nyala ? 0.7 : 0, ctx.currentTime, 0.05);
+      btn.textContent = nyala ? '🔊 Musik: nyala' : '🔇 Musik: mati';
+    }
+  });
+
+  // ===== Flipbook =====
   const pages = Array.from({ length: JUMLAH }, (_, i) =>
     `img/${String(i + 1).padStart(2, '0')}.jpg`);
 
-  const flip = new St.PageFlip(document.getElementById('book'), {
+  const pageFlip = new St.PageFlip(document.getElementById('book'), {
     width: LEBAR,
     height: TINGGI,
     size: 'stretch',
@@ -39,10 +169,11 @@
     mobileScrollSupport: false
   });
 
-  flip.loadFromImages(pages);
-  flip.on('init', () => document.getElementById('status').textContent = '');
-  flip.on('flip', e => {
+  pageFlip.loadFromImages(pages);
+  pageFlip.on('init', () => document.getElementById('status').textContent = '');
+  pageFlip.on('flip', e => {
     document.getElementById('status').textContent = `Halaman ${e.data + 1} dari ${JUMLAH}`;
+    sfxBalik();
   });
 </script>
 </body>
